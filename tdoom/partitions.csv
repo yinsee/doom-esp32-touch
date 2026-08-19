@@ -1,0 +1,16 @@
+# tdoom — 16MB flash layout for the Guition JC3248W535C.
+#
+# The `wad` partition holds doom1.wad as raw bytes (no filesystem): port_wad.c
+# memory-maps it with esp_partition_mmap, so lumps are read straight out of the
+# flash cache and the 4.2MB WAD costs zero RAM. Write it with:
+#
+#   esptool --port /dev/cu.usbmodem11201 write-flash 0x310000 doom1.wad
+#
+# `storage` is FAT and holds only Doom's config and savegames.
+#
+# Name,     Type, SubType, Offset,   Size
+nvs,        data, nvs,     0x9000,   0x5000
+otadata,    data, ota,     0xe000,   0x2000
+app0,       app,  ota_0,   0x10000,  0x300000
+wad,        data, 0x40,    0x310000, 0x500000
+storage,    data, fat,     0x810000, 0x7F0000

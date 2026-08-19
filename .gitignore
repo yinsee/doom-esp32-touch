@@ -1,0 +1,7 @@
+# build artifacts
+.build-*/
+# upstream clone kept only for reference diffs
+.doomgeneric-upstream/
+# game data — freely redistributable but not ours to vendor
+doom1.wad
+*.wad
