@@ -221,6 +221,11 @@ static boolean *joybuttons = &joyarray[1];		// allow [-1]
  
 static int      savegameslot; 
 static char     savedescription[32]; 
+
+/* tdoom: autosave uses the LAST of the six menu slots so it never overwrites a
+ * save the player made deliberately. */
+#define TD_AUTOSAVE_SLOT	5
+
  
 #define	BODYQUESIZE	32
 
@@ -1560,6 +1565,28 @@ void G_DoWorldDone (void)
     G_DoLoadLevel (); 
     gameaction = ga_nothing; 
     viewactive = true; 
+
+    /* tdoom: autosave on entering each new level.
+     *
+     * Goes through G_SaveGame rather than calling G_DoSaveGame directly: that
+     * sets sendsave, which G_BuildTiccmd turns into a BT_SPECIAL|BTS_SAVEGAME
+     * button and G_Ticker executes at a safe point in the tic loop. Saving
+     * inline from here would write mid-frame.
+     *
+     * usergame excludes demo playback and the attract mode, which also finish
+     * levels and would otherwise clobber the slot.
+     *
+     * Note this fires on entering level N+1, not on finishing level N, so the
+     * saved state is the START of the new level with everything you carried in.
+     * The very first level is not covered -- New Game goes straight to
+     * G_DoLoadLevel without passing through here -- which costs nothing. */
+    if (usergame && !demoplayback && !netgame)
+    {
+	char desc[24];
+
+	M_snprintf (desc, sizeof(desc), "AUTO E%dM%d", gameepisode, gamemap);
+	G_SaveGame (TD_AUTOSAVE_SLOT, desc);
+    }
 } 
  
 

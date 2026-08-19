@@ -274,6 +274,56 @@ the weapon tucks behind the status bar rather than floating.
 `screenblocks == 11` means "fullscreen view, no status bar", and this engine has
 no always-on HUD to replace it. Not a bug.
 
+### SCREENWIDTH means two different things
+
+Vanilla Doom assumes `SCREENWIDTH == 320`, so its 2D code uses `SCREENWIDTH`
+freely for layout. Here the screen is 480 wide but `V_DrawPatch` scales from a
+320x200 DESIGN space, so those two are no longer the same thing and every use
+has to be classified by **drawing path**:
+
+| code path | coordinate space | constant |
+|---|---|---|
+| feeds `V_DrawPatch` | design 320x200 | `V_BASEW` / `V_BASEH` |
+| writes straight into the framebuffer | real screen | `SCREENWIDTH` / `SCREENHEIGHT` |
+
+Get it wrong and it fails silently. `wi_stuff.c` computed the stat percentages
+at `SCREENWIDTH - SP_STATSX` = 430, past the 320 design width, so the scaler
+skipped every column and the intermission screen showed **no percentages at
+all** — while the level name and times were merely misplaced by 1.5x and looked
+plausible enough to miss.
+
+Fixed in `wi_stuff.c`, `m_menu.c`, `f_finale.c` and `st_stuff.c`. Deliberately
+NOT fixed:
+
+- `am_map.c` — the automap draws lines directly into `I_VideoBuffer`, so
+  `finit_width = SCREENWIDTH` is correct.
+- `f_finale.c`'s background tiling and `F_DrawPatchCol` — raw framebuffer
+  writes, likewise real screen space. Only its three `V_DrawPatch` call sites
+  were changed.
+- `wi_stuff.c:442` — a fake patch that exists *to trigger* a `V_DrawPatch`
+  error on Doom II MAP33+. Shareware Doom 1 never reaches it, and "fixing" a
+  deliberate error path would be wrong.
+
+## Autosave
+
+`G_DoWorldDone` autosaves on entering each new level, via `G_SaveGame` rather
+than calling `G_DoSaveGame` directly: that sets `sendsave`, which
+`G_BuildTiccmd` turns into a `BT_SPECIAL|BTS_SAVEGAME` button and `G_Ticker`
+executes at a safe point in the tic loop. Saving inline would write mid-frame.
+
+Guarded by `usergame && !demoplayback && !netgame` — the attract-mode demos
+finish levels too, and without the guard the title screen would silently
+overwrite the save every time a demo looped.
+
+Uses slot `TD_AUTOSAVE_SLOT` (5, the last menu slot) so it never overwrites a
+save the player made. It fires on *entering* level N+1, so the saved state is
+the start of the new level with everything carried in. The first level is not
+covered: New Game goes straight to `G_DoLoadLevel` without passing through here.
+
+Note this writes to flash while the WAD is memory-mapped from flash. ESP-IDF
+handles it by parking the other core, so the flush task stalls briefly — a
+hitch hidden by the level load.
+
 ## Render resolution and detail level
 
 Doom renders natively at `TD_DOOM_W` x `TD_DOOM_H` (480x288); the blit scales

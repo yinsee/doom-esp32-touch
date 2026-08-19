@@ -80,7 +80,11 @@
 #define SP_STATSY		50
 
 #define SP_TIMEX		16
-#define SP_TIMEY		(SCREENHEIGHT-32)
+/* tdoom: V_BASEH, not SCREENHEIGHT. These are DESIGN-space coordinates --
+ * V_DrawPatch scales them from 320x200 to the real screen. Using SCREENWIDTH
+ * here put the stat percentages at x=430, past the 320 design width, and the
+ * scaler dropped them entirely: no percentages on the intermission screen. */
+#define SP_TIMEY		(V_BASEH-32)
 
 
 // NET GAME STUFF
@@ -420,13 +424,13 @@ void WI_drawLF(void)
     if (gamemode != commercial || wbs->last < NUMCMAPS)
     {
         // draw <LevelName> 
-        V_DrawPatch((SCREENWIDTH - SHORT(lnames[wbs->last]->width))/2,
+        V_DrawPatch((V_BASEW - SHORT(lnames[wbs->last]->width))/2,
                     y, lnames[wbs->last]);
 
         // draw "Finished!"
         y += (5*SHORT(lnames[wbs->last]->height))/4;
 
-        V_DrawPatch((SCREENWIDTH - SHORT(finished->width)) / 2, y, finished);
+        V_DrawPatch((V_BASEW - SHORT(finished->width)) / 2, y, finished);
     }
     else if (wbs->last == NUMCMAPS)
     {
@@ -454,14 +458,14 @@ void WI_drawEL(void)
     int y = WI_TITLEY;
 
     // draw "Entering"
-    V_DrawPatch((SCREENWIDTH - SHORT(entering->width))/2,
+    V_DrawPatch((V_BASEW - SHORT(entering->width))/2,
 		y,
                 entering);
 
     // draw level
     y += (5*SHORT(lnames[wbs->next]->height))/4;
 
-    V_DrawPatch((SCREENWIDTH - SHORT(lnames[wbs->next]->width))/2,
+    V_DrawPatch((V_BASEW - SHORT(lnames[wbs->next]->width))/2,
 		y, 
                 lnames[wbs->next]);
 
@@ -489,9 +493,9 @@ WI_drawOnLnode
 	bottom = top + SHORT(c[i]->height);
 
 	if (left >= 0
-	    && right < SCREENWIDTH
+	    && right < V_BASEW
 	    && top >= 0
-	    && bottom < SCREENHEIGHT)
+	    && bottom < V_BASEH)
 	{
 	    fits = true;
 	}
@@ -1459,21 +1463,21 @@ void WI_drawStats(void)
     WI_drawLF();
 
     V_DrawPatch(SP_STATSX, SP_STATSY, kills);
-    WI_drawPercent(SCREENWIDTH - SP_STATSX, SP_STATSY, cnt_kills[0]);
+    WI_drawPercent(V_BASEW - SP_STATSX, SP_STATSY, cnt_kills[0]);
 
     V_DrawPatch(SP_STATSX, SP_STATSY+lh, items);
-    WI_drawPercent(SCREENWIDTH - SP_STATSX, SP_STATSY+lh, cnt_items[0]);
+    WI_drawPercent(V_BASEW - SP_STATSX, SP_STATSY+lh, cnt_items[0]);
 
     V_DrawPatch(SP_STATSX, SP_STATSY+2*lh, sp_secret);
-    WI_drawPercent(SCREENWIDTH - SP_STATSX, SP_STATSY+2*lh, cnt_secret[0]);
+    WI_drawPercent(V_BASEW - SP_STATSX, SP_STATSY+2*lh, cnt_secret[0]);
 
     V_DrawPatch(SP_TIMEX, SP_TIMEY, timepatch);
-    WI_drawTime(SCREENWIDTH/2 - SP_TIMEX, SP_TIMEY, cnt_time);
+    WI_drawTime(V_BASEW/2 - SP_TIMEX, SP_TIMEY, cnt_time);
 
     if (wbs->epsd < 3)
     {
-	V_DrawPatch(SCREENWIDTH/2 + SP_TIMEX, SP_TIMEY, par);
-	WI_drawTime(SCREENWIDTH - SP_TIMEX, SP_TIMEY, cnt_par);
+	V_DrawPatch(V_BASEW/2 + SP_TIMEX, SP_TIMEY, par);
+	WI_drawTime(V_BASEW - SP_TIMEX, SP_TIMEY, cnt_par);
     }
 
 }

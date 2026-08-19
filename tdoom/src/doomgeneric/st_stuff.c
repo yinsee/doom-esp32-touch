@@ -254,8 +254,9 @@
  // Height, in lines. 
 #define ST_OUTHEIGHT		1
 
+/* tdoom: design space -- V_DrawPatch scales it. */
 #define ST_MAPTITLEX \
-    (SCREENWIDTH - ST_MAPWIDTH * ST_CHATFONTWIDTH)
+    (V_BASEW - ST_MAPWIDTH * ST_CHATFONTWIDTH)
 
 #define ST_MAPTITLEY		0
 #define ST_MAPHEIGHT		1

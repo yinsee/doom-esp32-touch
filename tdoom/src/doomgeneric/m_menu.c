@@ -1405,7 +1405,7 @@ M_WriteText
 	}
 		
 	w = SHORT (hu_font[c]->width);
-	if (cx+w > SCREENWIDTH)
+	if (cx+w > V_BASEW)	/* tdoom: design space */
 	    break;
 	V_DrawPatchDirect(cx, cy, hu_font[c]);
 	cx+=w;
@@ -1979,7 +1979,7 @@ void M_Drawer (void)
     if (messageToPrint)
     {
 	start = 0;
-	y = SCREENHEIGHT/2 - M_StringHeight(messageString) / 2;
+	y = V_BASEH/2 - M_StringHeight(messageString) / 2;	/* tdoom: design space */
 	while (messageString[start] != '\0')
 	{
 	    int foundnewline = 0;
@@ -2007,7 +2007,7 @@ void M_Drawer (void)
                 start += strlen(string);
             }
 
-	    x = SCREENWIDTH/2 - M_StringWidth(string) / 2;
+	    x = V_BASEW/2 - M_StringWidth(string) / 2;	/* tdoom: design space */
 	    M_WriteText(x, y, string);
 	    y += SHORT(hu_font[0]->height);
 	}
