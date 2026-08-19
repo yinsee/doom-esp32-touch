@@ -109,13 +109,11 @@ STlib_drawNum
 	num = -num;
     }
 
-    // clear the area
     x = n->x - numdigits*w;
 
-    if (n->y - ST_Y < 0)
-	I_Error("drawNum: n->y - ST_Y < 0");
-
-    V_CopyRect(x, n->y - ST_Y, st_backing_screen, w*numdigits, h, x, n->y);
+    /* tdoom: no erase. The whole bar is repainted underneath every frame (see
+     * ST_Drawer), and st_backing_screen is no longer populated -- copying from
+     * it would paint zeroes over the bar. */
 
     // if non-number, do not draw it
     if (num == 1994)
@@ -223,7 +221,7 @@ STlib_updateMultIcon
 	    if (y - ST_Y < 0)
 		I_Error("updateMultIcon: y - ST_Y < 0");
 
-	    V_CopyRect(x, y-ST_Y, st_backing_screen, w, h, x, y);
+	    /* tdoom: no erase -- the bar is repainted underneath. */
 	}
 	V_DrawPatch(mi->x, mi->y, mi->p[*mi->inum]);
 	mi->oldinum = *mi->inum;
@@ -272,10 +270,10 @@ STlib_updateBinIcon
 	if (y - ST_Y < 0)
 	    I_Error("updateBinIcon: y - ST_Y < 0");
 
+	/* tdoom: nothing to draw when the icon is off -- the bar is repainted
+	 * underneath, so the old icon is already gone. */
 	if (*bi->val)
 	    V_DrawPatch(bi->x, bi->y, bi->p);
-	else
-	    V_CopyRect(x, y-ST_Y, st_backing_screen, w, h, x, y);
 
 	bi->oldval = *bi->val;
     }

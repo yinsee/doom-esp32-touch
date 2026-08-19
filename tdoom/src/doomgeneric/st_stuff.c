@@ -262,7 +262,8 @@
 #define ST_MAPHEIGHT		1
 
 // graphics are drawn to a backing screen and blitted to the real screen
-byte                   *st_backing_screen;
+/* tdoom: removed. The bar is drawn scaled straight to the screen and the
+ * widgets no longer erase from a backing buffer -- see ST_Drawer. */
 	    
 // main player in game
 static player_t*	plyr; 
@@ -1064,10 +1065,20 @@ void ST_Drawer (boolean fullscreen, boolean refresh)
     // Do red-/gold-shifts from damage/items
     ST_doPaletteStuff();
 
-    // If just after ST_Start(), refresh all
-    if (st_firsttime) ST_doRefresh();
-    // Otherwise, update as little as possible
-    else ST_diffDraw();
+    /* tdoom: always a full refresh.
+     *
+     * Upstream diff-draws: each widget erases its own old value by copying the
+     * clean bar graphic back out of st_backing_screen, then redraws. That
+     * depended on the bar being rendered into that buffer at 1:1.
+     *
+     * The bar is drawn scaled straight to the screen here (V_CopyRect does no
+     * scaling, so the backing-buffer route could not survive), which left the
+     * widgets with no working erase -- ammo, health and the face piled new
+     * digits on top of old ones.
+     *
+     * Repainting the bar underneath costs ~10K source pixels a frame against
+     * the 153600 the blit already writes. Not worth a cleverer fix. */
+    ST_doRefresh();
 
 }
 
@@ -1414,9 +1425,7 @@ void ST_Stop (void)
 void ST_Init (void)
 {
     ST_loadData();
-    st_backing_screen = (byte *) Z_Malloc(ST_WIDTH * ST_HEIGHT, PU_STATIC, 0);
     /* tdoom: Z_Malloc does not zero. The STBAR patch is 320 wide, so on a wider
      * screen everything past x=320 would otherwise show uninitialised heap. */
-    memset(st_backing_screen, 0, ST_WIDTH * ST_HEIGHT);
 }
 

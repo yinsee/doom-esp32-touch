@@ -78,7 +78,7 @@ typedef enum
 
 
 
-extern byte *st_backing_screen;
+/* tdoom: st_backing_screen removed -- see ST_Drawer in st_stuff.c. */
 extern cheatseq_t cheat_mus;
 extern cheatseq_t cheat_god;
 extern cheatseq_t cheat_ammo;

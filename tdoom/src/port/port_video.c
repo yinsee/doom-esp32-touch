@@ -74,7 +74,6 @@ extern void TD_SubmitFrame(void);
 
 extern int menuactive;      /* Doom's menu state, for the hint overlay   */
 extern int messageToPrint;  /* a yes/no prompt is up                     */
-extern int detailLevel;     /* 0 = high detail, 1 = low                  */
 
 /* Doom renders into this 320x200 palettized buffer; we read it directly
  * rather than through DG_ScreenBuffer (see I_FinishUpdate). */
@@ -206,7 +205,6 @@ static void RebuildPalette(void)
 #define C_AMBER  BE(0xFD20)
 
 static uint16_t *ov_fb;      /* target for the helpers below */
-static unsigned fps_x10 = 0; /* frame rate * 10, for the on-screen readout */
 
 static inline void OvPixel(int lx, int ly, uint16_t color)
 {
@@ -231,23 +229,51 @@ static void OvRect(int lx, int ly, int w, int h, uint16_t color)
 }
 
 /* 3x5 glyphs, one bit per pixel, leftmost column in bit 2.
- * 0-9, then '.', 'Y', 'N', 'H', 'L'. */
-#define OV_DOT 10
-#define OV_Y   11
-#define OV_N   12
-#define OV_H   13
-#define OV_L   14
+ * Digits, '.', and just the letters the on-screen buttons need. */
+enum {
+    G_0, G_1, G_2, G_3, G_4, G_5, G_6, G_7, G_8, G_9,
+    G_DOT, G_A, G_B, G_C, G_E, G_K, G_L, G_M, G_N, G_P,
+    G_S, G_T, G_Y, G_SPACE, G_COUNT
+};
 
-static const uint8_t ov_digits[15][5] = {
+static const uint8_t ov_glyph[G_COUNT][5] = {
     {7,5,5,5,7}, {2,6,2,2,7}, {7,1,7,4,7}, {7,1,7,1,7},
     {5,5,7,1,1}, {7,4,7,1,7}, {7,4,7,5,7}, {7,1,1,1,1},
     {7,5,7,5,7}, {7,5,7,1,7},
-    {0,0,0,0,2},              /* .  */
-    {5,5,2,2,2},              /* Y  */
-    {5,7,7,7,5},              /* N  */
-    {5,5,7,5,5},              /* H  */
-    {4,4,4,4,7},              /* L  */
+    {0,0,0,0,2},              /* .     */
+    {2,5,7,5,5},              /* A     */
+    {6,5,6,5,6},              /* B     */
+    {3,4,4,4,3},              /* C     */
+    {7,4,6,4,7},              /* E     */
+    {5,5,6,5,5},              /* K     */
+    {4,4,4,4,7},              /* L     */
+    {5,7,7,5,5},              /* M     */
+    {5,7,7,7,5},              /* N     */
+    {6,5,6,4,4},              /* P     */
+    {3,4,2,1,6},              /* S     */
+    {7,2,2,2,2},              /* T     */
+    {5,5,2,2,2},              /* Y     */
+    {0,0,0,0,0},              /* space */
 };
+
+/* Only the characters the buttons actually use; anything else draws blank. */
+static int OvGlyphFor(char c)
+{
+    switch (c)
+    {
+        case '0': case '1': case '2': case '3': case '4':
+        case '5': case '6': case '7': case '8': case '9':
+            return G_0 + (c - '0');
+        case '.': return G_DOT;
+        case 'A': return G_A;   case 'B': return G_B;
+        case 'C': return G_C;   case 'E': return G_E;
+        case 'K': return G_K;   case 'L': return G_L;
+        case 'M': return G_M;   case 'N': return G_N;
+        case 'P': return G_P;   case 'S': return G_S;
+        case 'T': return G_T;   case 'Y': return G_Y;
+        default:  return G_SPACE;
+    }
+}
 
 static void OvDigit(int lx, int ly, int d, int scale, uint16_t color)
 {
@@ -256,7 +282,7 @@ static void OvDigit(int lx, int ly, int d, int scale, uint16_t color)
     {
         for (col = 0; col < 3; col++)
         {
-            if (ov_digits[d][row] & (4 >> col))
+            if (ov_glyph[d][row] & (4 >> col))
             {
                 OvRect(lx + col * scale, ly + row * scale, scale, scale, color);
             }
@@ -264,43 +290,47 @@ static void OvDigit(int lx, int ly, int d, int scale, uint16_t color)
     }
 }
 
-/* fps as "NN.N" in the top-right corner, on a dark plate so it stays readable
- * against sky and muzzle flash alike. fps10 is fps * 10. */
-static void OvDrawFps(unsigned fps10, int scale)
+/* Text width in pixels, including the 1-cell gaps between glyphs. */
+static int OvTextWidth(const char *str, int scale)
 {
-    int glyphs[5];
-    int n, i, x, y, w, start;
+    int n = 0;
 
-    /* "NNN.N" needs FIVE slots: hundreds, tens, units, point, tenths.
-     * The first version used four and put the point between the tens and the
-     * units, so 28.6 fps rendered as "2.8" -- the tenths digit was never even
-     * emitted. */
-    glyphs[0] = (fps10 / 1000) % 10;   /* hundreds */
-    glyphs[1] = (fps10 / 100) % 10;    /* tens     */
-    glyphs[2] = (fps10 / 10) % 10;     /* units    */
-    glyphs[3] = OV_DOT;                /* .        */
-    glyphs[4] = fps10 % 10;            /* tenths   */
-
-    /* Drop leading zeros, but never the digit immediately before the point. */
-    start = 0;
-    while (start < 2 && glyphs[start] == 0)
+    while (str[n] != '\0')
     {
-        start++;
+        n++;
     }
+    return (n * 4 - 1) * scale;
+}
 
-    n = 5 - start;
-    w = n * 4 * scale;
+static void OvText(int lx, int ly, const char *str, int scale, uint16_t color)
+{
+    int i;
 
-    x = SCR_W - w - 6;
-    y = 5;
-
-    OvRect(x - 3, y - 3, w + 6, 5 * scale + 6, C_BLACK);
-
-    for (i = 0; i < n; i++)
+    for (i = 0; str[i] != '\0'; i++)
     {
-        OvDigit(x + i * 4 * scale, y, glyphs[start + i], scale,
-                fps10 >= 250 ? C_GREEN : C_AMBER);
+        OvDigit(lx + i * 4 * scale, ly, OvGlyphFor(str[i]), scale, color);
     }
+}
+
+/* A labelled button: dark plate, coloured border, centred text.
+ *
+ * Used for the controls that are genuinely discoverable-by-looking rather than
+ * learned by position -- MAP in game, BACK and SELECT in menus, Y/N on
+ * prompts. The movement and turn pads stay invisible on purpose: they are held,
+ * not hunted for, and drawing them would cover the picture. */
+static void OvButton(int lx, int ly, int w, int h, const char *label,
+                     int scale, uint16_t color)
+{
+    int tw = OvTextWidth(label, scale);
+    int th = 5 * scale;
+
+    OvRect(lx, ly, w, h, C_BLACK);
+    OvRect(lx, ly, w, 1, color);
+    OvRect(lx, ly + h - 1, w, 1, color);
+    OvRect(lx, ly, 1, h, color);
+    OvRect(lx + w - 1, ly, 1, h, color);
+
+    OvText(lx + (w - tw) / 2, ly + (h - th) / 2, label, scale, color);
 }
 
 /* Solid triangle. dir: 0 up, 1 down, 2 left, 3 right.
@@ -337,41 +367,21 @@ static void OvTriangle(int cx, int cy, int size, int dir, uint16_t color)
     }
 }
 
-/* Detail level beside the fps readout: H = high (full resolution), L = low
- * (R_DrawColumnLow, half horizontal resolution in the 3D view). Without this
- * there is no way to tell which mode a given frame rate belongs to. */
-static void OvDrawDetail(int low, int scale)
-{
-    int x = SCR_W - 6 - (5 * 4 * scale) - (4 * scale) - 4;
-    int y = 5;
-
-    OvRect(x - 3, y - 3, 3 * scale + 6, 5 * scale + 6, C_BLACK);
-    OvDigit(x, y, low ? OV_L : OV_H, scale, C_WHITE);
-}
-
 /* Yes/no prompt hints. These prompts accept only 'y'/'n', and the touch zones
  * are invisible, so without this the dialog is unanswerable-looking. */
+/* Yes/no prompt hints. These prompts accept only 'y'/'n', and the zones are
+ * invisible, so without this the dialog looks unanswerable. */
 static void OvDrawConfirmHints(void)
 {
-    int s = 4;
-
-    /* NO in the top-left corner -- the same corner that means "back". */
-    OvRect(8, 6, 3 * s + 8, 5 * s + 8, C_BLACK);
-    OvDigit(12, 10, OV_N, s, C_AMBER);
-
-    /* YES over the rest, anchored bottom-right where "select" lives. */
-    OvRect(SCR_W - 4 - (3 * s + 8), SCR_H - 8 - (5 * s + 8),
-           3 * s + 8, 5 * s + 8, C_BLACK);
-    OvDigit(SCR_W - (3 * s) - 8, SCR_H - (5 * s) - 12, OV_Y, s, C_GREEN);
+    OvButton(4, 2, 84, ROW1 - 4, "NO", 3, C_AMBER);
+    OvButton(SCR_W - 112, ROW3 + 2, 108, SCR_H - ROW3 - 4, "YES", 3, C_GREEN);
 }
 
-/* Menu hints. The touch zones are invisible, so without these the layout has to
- * be memorised -- which is exactly what made menus confusing. */
 static void OvDrawMenuHints(void)
 {
-    int turncy = (ROW1 + ROW3) / 2;              /* pad band centre y */
+    int turncy = (ROW1 + ROW3) / 2;
 
-    /* Move pad: up / down, drawn inside the triangles that walk forward/back. */
+    /* Move pad: up / down, on the cells that walk forward / back. */
     OvTriangle(TD_MZ_CX, (ROW1 + TD_MZ_CY) / 2, 24, 0, C_WHITE);
     OvTriangle(TD_MZ_CX, (TD_MZ_CY + ROW3) / 2, 24, 1, C_WHITE);
 
@@ -380,11 +390,11 @@ static void OvDrawMenuHints(void)
     OvTriangle((TD_TZ_X0 + TD_TZ_XM) / 2, turncy, 20, 2, C_AMBER);
     OvTriangle((TD_TZ_XM + SCR_W) / 2, turncy, 20, 3, C_AMBER);
 
-    /* Top-left backs out, same corner as ESC in game. */
-    OvTriangle(30, ROW1 / 2, 18, 2, C_AMBER);
+    /* BACK sits in the top-left band, the same corner ESC uses in game. */
+    OvButton(4, 2, 84, ROW1 - 4, "BACK", 3, C_AMBER);
 
-    /* Bar across the bottom row: tap anywhere along it to select. */
-    OvRect(8, SCR_H - 9, SCR_W - 16, 4, C_GREEN);
+    /* SELECT spans the bottom band, which is one big confirm target. */
+    OvButton(4, ROW3 + 2, SCR_W - 8, SCR_H - ROW3 - 4, "SELECT", 3, C_GREEN);
 }
 
 void DG_Init(void)
@@ -477,8 +487,14 @@ void DG_DrawFrame(void)
     {
         OvDrawMenuHints();
     }
-    OvDrawFps(fps_x10, 3);
-    OvDrawDetail(detailLevel, 3);
+    else
+    {
+        /* MAP is the one in-game control worth showing: it is a tap, it is
+         * easy to forget, and the top band is otherwise unused screen. ESC
+         * shares the band on the left but stays unmarked -- the automap is the
+         * thing people hunt for. Frame rate now goes to serial only. */
+        OvButton(SCR_W - 76, 2, 72, ROW1 - 4, "MAP", 3, C_WHITE);
+    }
 
     {
         static uint32_t frames, t_last, acc_render, acc_wait, acc_blit;
@@ -487,25 +503,6 @@ void DG_DrawFrame(void)
         acc_render += t_enter - t_ret;   /* doomgeneric's own work    */
         acc_wait   += t_got - t_enter;   /* stalled on the flush task */
         acc_blit   += t_done - t_got;    /* our conversion            */
-
-        {
-            /* Rolling average over 10 frames: fast enough to respond, slow
-             * enough not to flicker. Separate from the 100-frame serial
-             * report, which is for analysis rather than watching. */
-            static uint32_t r_frames, r_last;
-            if (r_last == 0) r_last = t_done;
-            if (++r_frames >= 10)
-            {
-                uint32_t rdt = t_done - r_last;
-                if (rdt > 0)
-                {
-                    fps_x10 = (r_frames * 10000) / rdt;
-                    if (fps_x10 > 9999) fps_x10 = 9999;
-                }
-                r_frames = 0;
-                r_last = t_done;
-            }
-        }
 
         if (t_last == 0) t_last = t_done;
         if (++frames >= 100)

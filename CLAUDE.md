@@ -304,6 +304,22 @@ NOT fixed:
   error on Doom II MAP33+. Shareware Doom 1 never reaches it, and "fixing" a
   deliberate error path would be wrong.
 
+## The status bar is repainted in full every frame
+
+Upstream diff-draws it: each widget erases its old value by copying the clean
+bar graphic back out of `st_backing_screen`, then redraws. That depends on the
+bar living in that buffer at 1:1.
+
+The bar is drawn *scaled* straight to the screen here — `V_CopyRect` does no
+scaling, so the backing-buffer route could not survive — which left the widgets
+with no working erase. Ammo, health and the face piled new digits on top of old
+ones.
+
+`ST_Drawer` now always calls `ST_doRefresh()`, the three `V_CopyRect` erases in
+`st_lib.c` are gone (they would paint zeroes over the freshly drawn bar), and
+`st_backing_screen` is deleted. Repainting costs ~10K source pixels a frame
+against the 153600 the blit already writes.
+
 ## Autosave
 
 `G_DoWorldDone` autosaves on entering each new level, via `G_SaveGame` rather
@@ -346,26 +362,52 @@ changes only how many columns the 3D view computes:
 
 The pads map position directly to a key: where you touch is what you get.
 
-The movement pad is three horizontal bands — forward across the top 40%, back
-across the bottom 40%, and a narrow strafe strip (20%, split left/right) between
-them. Forward and back are what you hold, so they get the generous targets;
-strafing is a deliberate sidestep, and a narrow strip you must aim for stops it
-firing by accident while walking. The turn pad is split down the middle. No dead
-spots on either.
+Layout is two 32px bands with the pads filling everything between:
 
-An earlier version split the movement pad into four triangles from its centre.
-That put strafe on the entire left and right flanks, which made it too easy to
-trigger while walking.
+```
++--------------------+--------------------+   ly <  32
+|        ESC         |        MAP         |
++----------+---------+---------+----------+
+| MOVE PAD |    dead centre    | TURN PAD |   ly 32..287
+| 160x256  |      160 wide     | 160x256  |
++----------+---------+---------+----------+   ly >= 288
+|        USE         |        FIRE        |
++--------------------+--------------------+
+```
+
+The bands are thin because they are TAP targets; the pads are what a thumb
+rests on, so they get the height. Geometry lives once in `src/port/td_res.h`,
+shared by `port_input.c` (what a touch means) and `port_video.c` (where the
+hints are drawn) so the two cannot disagree.
+
+The movement pad is three horizontal bands — forward across the top 40%, back
+across the bottom 40%, and a narrow strafe strip (20%) between. Forward and
+back are what you hold, so they get the generous targets; a strafe strip you
+must aim for stops it firing by accident while walking. The turn pad splits down
+the middle. No dead spots on either; the 160px gap between them is unbound.
 
 **A virtual analog stick was implemented and rejected.** Each pad became a drag
-surface, the landing point becoming the stick origin, feeding
-`forwardmove`/`sidemove`/`angleturn` proportionally. It worked correctly and
-felt worse: on glass with no tactile centre, having to drag before anything
-happens is slower and less certain than putting a thumb straight on the
-direction you want. Do not re-propose it as an obvious improvement.
+surface feeding `forwardmove`/`sidemove`/`angleturn` proportionally. It worked
+and felt worse: on glass with no tactile centre, having to drag before anything
+happens is slower and less certain than putting a thumb on the direction you
+want. Do not re-propose it as an obvious improvement.
 
-Only the top band (esc/map), the bottom band (use/fire) and the two pads are
-bound; the 160px gap between the pads is deliberately unbound.
+An earlier movement pad split into four triangles from the centre. That put
+strafe on the entire left and right flanks and was too easy to trigger while
+walking.
+
+### On-screen buttons
+
+`port_video.c` draws labelled buttons (`OvButton`) for controls that are found
+by looking rather than by muscle memory: **MAP** in game, **BACK** and
+**SELECT** in menus, **YES**/**NO** on prompts. It carries its own 3x5 glyph
+set — digits plus only the letters those labels need.
+
+The move and turn pads are deliberately NOT outlined: they are held rather than
+hunted for, and drawing them would cover the picture during play.
+
+The frame rate and detail level used to be drawn on screen; they now go to
+serial only, every 100 frames.
 
 ## Touch controller
 

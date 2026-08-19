@@ -649,14 +649,25 @@ void M_DoSave(int slot)
 //
 void M_SaveSelect(int choice)
 {
-    // we are going to be intercepting all chars
-    saveStringEnter = 1;
-    
+    /* tdoom: name the save automatically and write it immediately.
+     *
+     * Upstream sets saveStringEnter and intercepts every keystroke so the
+     * player can type a name. There is no keyboard here, so that state was
+     * unescapable -- picking a slot simply hung the menu.
+     *
+     * The name is the level plus elapsed time, e.g. "E1M3 12:34". A wall-clock
+     * date would be preferable but is not available: the board has no RTC and
+     * this firmware never sets the system clock (no WiFi, no NTP), so time()
+     * would return 1970 plus uptime. Level and progress are the most useful
+     * things we can honestly put here anyway. */
     saveSlot = choice;
-    M_StringCopy(saveOldString,savegamestrings[choice], SAVESTRINGSIZE);
-    if (!strcmp(savegamestrings[choice], EMPTYSTRING))
-	savegamestrings[choice][0] = 0;
-    saveCharIndex = strlen(savegamestrings[choice]);
+
+    M_snprintf(savegamestrings[choice], SAVESTRINGSIZE, "E%dM%d %d:%02d",
+	       gameepisode, gamemap,
+	       (leveltime / TICRATE) / 60,
+	       (leveltime / TICRATE) % 60);
+
+    M_DoSave(choice);
 }
 
 //
