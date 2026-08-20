@@ -190,6 +190,18 @@ whatever you were instrumenting. Per-frame logging caused this; the attract mode
 was never broken, it just could not report progress. Keep logging sparse (health
 report is every 5s) and never log per frame.
 
+### Overlays must be drawn BEFORE TD_SubmitFrame()
+
+`TD_SubmitFrame()` hands the buffer to core 0, which immediately starts the
+QSPI DMA out of it. Anything written after that races the flush: the DMA reads
+some rows before the write and some after, so button borders blink and plates
+appear half-drawn, differently every frame.
+
+It looks like a drawing bug in the overlay code — it is not, the geometry is
+fine and a torn read just makes it look wrong. The submit call sat above the
+overlay block for a while with a comment directly under it claiming the
+opposite.
+
 ### The SPI driver competes with the render resolution for internal RAM
 
 The framebuffers live in PSRAM, so `spi_master` allocates an internal DMA bounce
@@ -399,12 +411,24 @@ walking.
 ### On-screen buttons
 
 `port_video.c` draws labelled buttons (`OvButton`) for controls that are found
-by looking rather than by muscle memory: **MAP** in game, **BACK** and
-**SELECT** in menus, **YES**/**NO** on prompts. It carries its own 3x5 glyph
-set — digits plus only the letters those labels need.
+by looking rather than by muscle memory: **MENU** and **MAP** in game, **BACK**
+and **SELECT** in menus, **YES**/**NO** on prompts. It carries its own 3x5
+glyph set — digits plus only the letters those labels need.
 
-The move and turn pads are deliberately NOT outlined: they are held rather than
-hunted for, and drawing them would cover the picture during play.
+Menus also get four arrow plates (`OvArrowButton`) over the pad cells that act
+as a d-pad: up/down on the move pad, left/right on the turn pad. Same plate and
+border as the labelled buttons, with a triangle where the text would go — bare
+triangles floating over the picture read as a rendering artifact rather than a
+control.
+
+Plates are **25% black, not opaque** (`OvDimRect` scales each RGB565 channel to
+3/4), so a button never fully hides what is behind it. It is a
+read-modify-write, so it has to undo the big-endian storage and swap back;
+that is fine for the few thousand pixels involved, and would not be for the
+whole frame.
+
+The move and turn pads themselves are deliberately NOT outlined: they are held
+rather than hunted for, and drawing them would cover the picture during play.
 
 The frame rate and detail level used to be drawn on screen; they now go to
 serial only, every 100 frames.

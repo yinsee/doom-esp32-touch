@@ -200,9 +200,13 @@ static void RebuildPalette(void)
 #define BE(c) ((uint16_t)(((c) >> 8) | ((c) << 8)))
 
 #define C_WHITE  BE(0xFFFF)
-#define C_BLACK  BE(0x0000)
 #define C_GREEN  BE(0x07E0)
 #define C_AMBER  BE(0xFD20)
+
+/* D-pad hint plate. 72x48 sits comfortably inside a 160-wide pad cell and is
+ * still a fair thumb target. */
+#define OV_ARROW_W 72
+#define OV_ARROW_H 48
 
 static uint16_t *ov_fb;      /* target for the helpers below */
 
@@ -214,6 +218,46 @@ static inline void OvPixel(int lx, int ly, uint16_t color)
     }
     /* Same rotation as the blit: landscape (lx,ly) -> portrait index. */
     ov_fb[(size_t)lx * PANEL_W + (PANEL_W - 1 - ly)] = color;
+}
+
+/* Darken a rectangle instead of filling it: the button plates are 25% black
+ * over the picture rather than opaque, so a control never fully hides what is
+ * behind it. Read-modify-write, so it has to undo the big-endian storage, work
+ * in native RGB565, and swap back. Only a few thousand pixels a frame -- the
+ * blit already writes 153600. */
+static inline void OvDimPixel(int lx, int ly)
+{
+    size_t idx;
+    uint16_t v;
+    unsigned r, g, b;
+
+    if (lx < 0 || lx >= SCR_W || ly < 0 || ly >= SCR_H)
+    {
+        return;
+    }
+    idx = (size_t)lx * PANEL_W + (PANEL_W - 1 - ly);
+
+    v = ov_fb[idx];
+    v = (uint16_t)((v >> 8) | (v << 8));        /* back to native RGB565 */
+
+    r = ((v >> 11) & 0x1F) * 3 / 4;
+    g = ((v >>  5) & 0x3F) * 3 / 4;
+    b = ( v        & 0x1F) * 3 / 4;
+
+    v = (uint16_t)((r << 11) | (g << 5) | b);
+    ov_fb[idx] = (uint16_t)((v >> 8) | (v << 8));
+}
+
+static void OvDimRect(int lx, int ly, int w, int h)
+{
+    int i, j;
+    for (j = 0; j < h; j++)
+    {
+        for (i = 0; i < w; i++)
+        {
+            OvDimPixel(lx + i, ly + j);
+        }
+    }
 }
 
 static void OvRect(int lx, int ly, int w, int h, uint16_t color)
@@ -233,7 +277,7 @@ static void OvRect(int lx, int ly, int w, int h, uint16_t color)
 enum {
     G_0, G_1, G_2, G_3, G_4, G_5, G_6, G_7, G_8, G_9,
     G_DOT, G_A, G_B, G_C, G_E, G_K, G_L, G_M, G_N, G_P,
-    G_S, G_T, G_Y, G_SPACE, G_COUNT
+    G_S, G_T, G_U, G_Y, G_SPACE, G_COUNT
 };
 
 static const uint8_t ov_glyph[G_COUNT][5] = {
@@ -252,6 +296,7 @@ static const uint8_t ov_glyph[G_COUNT][5] = {
     {6,5,6,4,4},              /* P     */
     {3,4,2,1,6},              /* S     */
     {7,2,2,2,2},              /* T     */
+    {5,5,5,5,7},              /* U     */
     {5,5,2,2,2},              /* Y     */
     {0,0,0,0,0},              /* space */
 };
@@ -270,7 +315,8 @@ static int OvGlyphFor(char c)
         case 'K': return G_K;   case 'L': return G_L;
         case 'M': return G_M;   case 'N': return G_N;
         case 'P': return G_P;   case 'S': return G_S;
-        case 'T': return G_T;   case 'Y': return G_Y;
+        case 'T': return G_T;   case 'U': return G_U;
+        case 'Y': return G_Y;
         default:  return G_SPACE;
     }
 }
@@ -324,7 +370,7 @@ static void OvButton(int lx, int ly, int w, int h, const char *label,
     int tw = OvTextWidth(label, scale);
     int th = 5 * scale;
 
-    OvRect(lx, ly, w, h, C_BLACK);
+    OvDimRect(lx, ly, w, h);
     OvRect(lx, ly, w, 1, color);
     OvRect(lx, ly + h - 1, w, 1, color);
     OvRect(lx, ly, 1, h, color);
@@ -367,6 +413,23 @@ static void OvTriangle(int cx, int cy, int size, int dir, uint16_t color)
     }
 }
 
+/* An arrow button: the same dark plate and coloured border as OvButton, with a
+ * triangle where the label would go. The d-pad hints use this so every drawn
+ * control on screen reads as the same kind of object -- a bare triangle floating
+ * over the picture looked like an artifact rather than a button. */
+static void OvArrowButton(int lx, int ly, int w, int h, int dir, uint16_t color)
+{
+    int size = (w < h ? w : h) / 2;
+
+    OvDimRect(lx, ly, w, h);
+    OvRect(lx, ly, w, 1, color);
+    OvRect(lx, ly + h - 1, w, 1, color);
+    OvRect(lx, ly, 1, h, color);
+    OvRect(lx + w - 1, ly, 1, h, color);
+
+    OvTriangle(lx + w / 2, ly + h / 2, size, dir, color);
+}
+
 /* Yes/no prompt hints. These prompts accept only 'y'/'n', and the touch zones
  * are invisible, so without this the dialog is unanswerable-looking. */
 /* Yes/no prompt hints. These prompts accept only 'y'/'n', and the zones are
@@ -382,13 +445,21 @@ static void OvDrawMenuHints(void)
     int turncy = (ROW1 + ROW3) / 2;
 
     /* Move pad: up / down, on the cells that walk forward / back. */
-    OvTriangle(TD_MZ_CX, (ROW1 + TD_MZ_CY) / 2, 24, 0, C_WHITE);
-    OvTriangle(TD_MZ_CX, (TD_MZ_CY + ROW3) / 2, 24, 1, C_WHITE);
+    OvArrowButton(TD_MZ_CX - OV_ARROW_W / 2,
+                  (ROW1 + TD_MZ_CY) / 2 - OV_ARROW_H / 2,
+                  OV_ARROW_W, OV_ARROW_H, 0, C_WHITE);
+    OvArrowButton(TD_MZ_CX - OV_ARROW_W / 2,
+                  (TD_MZ_CY + ROW3) / 2 - OV_ARROW_H / 2,
+                  OV_ARROW_W, OV_ARROW_H, 1, C_WHITE);
 
     /* Turn pad: slider left / right. Several Options entries (Screen Size,
      * volumes, sensitivity) respond only to these. */
-    OvTriangle((TD_TZ_X0 + TD_TZ_XM) / 2, turncy, 20, 2, C_AMBER);
-    OvTriangle((TD_TZ_XM + SCR_W) / 2, turncy, 20, 3, C_AMBER);
+    OvArrowButton((TD_TZ_X0 + TD_TZ_XM) / 2 - OV_ARROW_W / 2,
+                  turncy - OV_ARROW_H / 2,
+                  OV_ARROW_W, OV_ARROW_H, 2, C_AMBER);
+    OvArrowButton((TD_TZ_XM + SCR_W) / 2 - OV_ARROW_W / 2,
+                  turncy - OV_ARROW_H / 2,
+                  OV_ARROW_W, OV_ARROW_H, 3, C_AMBER);
 
     /* BACK sits in the top-left band, the same corner ESC uses in game. */
     OvButton(4, 2, 84, ROW1 - 4, "BACK", 3, C_AMBER);
@@ -472,12 +543,11 @@ void DG_DrawFrame(void)
         }
     }
 
-    TD_SubmitFrame();
-
-    /* Frame timing report. Uses printf rather than ESP_LOGI because Arduino
-     * ships with the IDF log level at ERROR, so ESP_LOGI is compiled out --
-     * Doom's own printf output is what actually reaches the console. */
-    /* Overlays go on top of the finished frame, before it is submitted. */
+    /* Overlays go on top of the finished frame, and MUST be drawn before
+     * TD_SubmitFrame() hands the buffer to core 0. Submitting first races the
+     * QSPI DMA against these writes: the flush reads the buffer while the
+     * overlay is still being painted into it, so borders flicker and plates
+     * appear half-drawn. */
     ov_fb = fb;
     if (messageToPrint)
     {
@@ -489,13 +559,20 @@ void DG_DrawFrame(void)
     }
     else
     {
-        /* MAP is the one in-game control worth showing: it is a tap, it is
-         * easy to forget, and the top band is otherwise unused screen. ESC
-         * shares the band on the left but stays unmarked -- the automap is the
-         * thing people hunt for. Frame rate now goes to serial only. */
+        /* The two in-game controls worth showing: both are taps, both are
+         * easy to forget, and the top band is otherwise unused screen. MENU
+         * is the ESC zone on the left -- it is the way out of the game, so
+         * leaving it unmarked made the game look like it had none. Frame rate
+         * now goes to serial only. */
+        OvButton(4, 2, 84, ROW1 - 4, "MENU", 3, C_AMBER);
         OvButton(SCR_W - 76, 2, 72, ROW1 - 4, "MAP", 3, C_WHITE);
     }
 
+    TD_SubmitFrame();
+
+    /* Frame timing report. Uses printf rather than ESP_LOGI because Arduino
+     * ships with the IDF log level at ERROR, so ESP_LOGI is compiled out --
+     * Doom's own printf output is what actually reaches the console. */
     {
         static uint32_t frames, t_last, acc_render, acc_wait, acc_blit;
 
